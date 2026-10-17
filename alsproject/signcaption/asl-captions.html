@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SignCaption</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: camera and caption stacked on the left, word list on the right; one dark "broadcast booth" look */
+:root{
+  --bg:#12141a; --panel:#1b1e27; --line:#2b2f3c; --fg:#eceef4; --muted:#9097a8;
+  --accent:#ffb547; --accent-ink:#1a1204; --ok:#5fd39a; --bad:#ff6b6b;
+  --f-display:"Atkinson Hyperlegible",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 var(--f-display)}
+.wrap{max-width:1240px;margin:0 auto;padding-block:18px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:20px}
+@media (max-width:900px){.wrap{grid-template-columns:minmax(0,1fr)}}
+header{grid-column:1/-1;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1{margin:0;font-size:24px}
+h1 span{color:var(--accent)}
+#sc-status{font:500 13px var(--f-mono);color:var(--muted)}
+#sc-status.live{color:var(--ok)}
+#sc-status.err{color:var(--bad)}
+
+.stage{position:relative;background:#000;border-radius:12px;overflow:hidden;aspect-ratio:4/3;max-width:100%}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.bigletter{position:absolute;top:8px;right:16px;font:700 100px/1 var(--f-display);color:var(--accent);text-shadow:0 4px 24px #000}
+.meter{position:absolute;left:0;bottom:0;height:8px;background:var(--accent);width:0}
+.startcard{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:20px}
+.startcard p{margin:0;color:var(--muted);max-width:36ch}
+.calbox{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:rgba(10,11,15,.5);text-align:center}
+.calbox .L{font:700 150px/1 var(--f-display);color:var(--accent);text-shadow:0 4px 30px #000}
+.calbox .note{font-weight:700;font-size:20px;text-shadow:0 2px 10px #000}
+.calbox .prog{width:60%;height:6px;background:rgba(255,255,255,.15);border-radius:3px;overflow:hidden}
+.calbox .prog i{display:block;height:100%;background:var(--accent);width:0}
+
+.caption{margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+#sc-caption{font:700 36px/1.25 var(--f-display);word-wrap:break-word;min-height:46px}
+#sc-caption .new{color:var(--accent)}
+#sc-caption:empty::before{content:"Fingerspell a word, then drop your hand.";color:var(--muted);font-weight:400;font-size:20px}
+.spellrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;min-height:42px}
+#sc-spelling{font:500 22px var(--f-mono);letter-spacing:.2em;color:var(--muted)}
+#sc-sugs{display:flex;gap:8px;flex-wrap:wrap}
+#sc-sugs button{background:transparent;border:1.5px solid var(--accent);color:var(--accent);font-size:18px;padding:5px 14px}
+
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button{font:700 15px var(--f-display);background:var(--line);color:var(--fg);border:0;border-radius:9px;padding:10px 16px;cursor:pointer}
+button:hover{filter:brightness(1.2)}
+button:focus-visible,textarea:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:var(--accent-ink);font-size:18px;padding:12px 26px}
+kbd{font:12px var(--f-mono);opacity:.7;margin-left:4px}
+
+aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0;align-self:start}
+h2{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+textarea{width:100%;min-height:150px;resize:vertical;font:17px/1.5 var(--f-display);background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:10px 12px}
+.hint{font-size:14px;color:var(--muted);margin:0}
+details{border-top:1px solid var(--line);padding-top:12px}
+summary{cursor:pointer;color:var(--muted);font-weight:700;font-size:14px}
+details[open] summary{margin-bottom:12px}
+.opts{display:flex;flex-direction:column;gap:12px}
+.opts label{display:flex;gap:8px;align-items:center;font-size:15px}
+input[type=range]{accent-color:var(--accent);flex:1}
+.opts ol{margin:0;padding-left:18px;font-size:14px;color:var(--muted)}
+
+body.capmode .wrap>*:not(.left),body.capmode .stage,body.capmode .bar,body.capmode .spellrow{display:none}
+body.capmode .wrap{grid-template-columns:1fr}
+body.capmode .caption{background:#000;border:0}
+body.capmode #sc-caption{font-size:64px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Sign<span>Caption</span></h1>
+    <span id="sc-status">Loading…</span>
+  </header>
+
+  <section class="left">
+    <div class="stage">
+      <video id="sc-video" playsinline muted></video>
+      <canvas id="sc-overlay"></canvas>
+      <div class="bigletter" id="sc-letter"></div>
+      <div class="meter" id="sc-meter"></div>
+      <div class="startcard" id="sc-startcard">
+        <button class="primary" id="sc-start">Start</button>
+        <button id="sc-startskip">Start without calibrating</button>
+        <p id="sc-startnote">Start learns your hand first: you sign each letter twice, about 2 minutes. Skipping uses built-in letters, which are less accurate. You can calibrate later in Settings.</p>
+      </div>
+      <div class="calbox" id="sc-calbox" hidden>
+        <div class="note" id="sc-calnote"></div>
+        <div class="L" id="sc-calL"></div>
+        <div class="prog"><i id="sc-calprog"></i></div>
+        <button id="sc-calskip">Skip</button>
+      </div>
+    </div>
+
+    <div class="caption">
+      <div id="sc-caption"></div>
+      <div class="spellrow"><span id="sc-spelling"></span><div id="sc-sugs"></div></div>
+    </div>
+
+    <div class="bar">
+      <button id="sc-undo">Undo</button>
+      <button id="sc-clear">Clear</button>
+      <button id="sc-capmode">Caption-only <kbd>C</kbd></button>
+    </div>
+  </section>
+
+  <aside>
+    <h2>My words</h2>
+    <textarea id="sc-words" spellcheck="false" placeholder="hello, my, name, is…"></textarea>
+    <p class="hint">Only these words get typed. Fewer, more different words = more accurate. Tap a word under the caption to send it early.</p>
+
+    <details>
+      <summary>Settings</summary>
+      <div class="opts">
+        <label><input type="checkbox" id="sc-speak"> Speak words aloud</label>
+        <label>Letter speed <input type="range" id="sc-hold" min="6" max="22" value="12" style="direction:rtl"></label>
+        <button id="sc-recal">Redo calibration</button>
+      </div>
+    </details>
+
+    <details>
+      <summary>Using it in Zoom</summary>
+      <div class="opts">
+        <ol>
+          <li>Share Screen → this browser window. Tick “Share sound” if words are spoken aloud.</li>
+          <li>Press <b>C</b> for a big caption-only view while sharing.</li>
+          <li>If Zoom and this page fight over the camera, turn your Zoom video off.</li>
+        </ol>
+      </div>
+    </details>
+  </aside>
+</div>
+
+<script type="module">
+// Load the hand tracker from the saved copy next to this page if present, else from the internet.
+const CDN="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+let vision, WASM=CDN+"/wasm",
+    MODEL="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+try{ vision=await import("./vendor/vision_bundle.mjs"); WASM="./vendor/wasm"; MODEL="./vendor/hand_landmarker.task"; }
+catch{ vision=await import(CDN); }
+const { FilesetResolver, HandLandmarker } = vision;
+
+const $=id=>document.getElementById("sc-"+id);
+const video=$("video"), overlay=$("overlay"), ctx=overlay.getContext("2d");
+const store={
+  get(k,d){ try{ const v=localStorage.getItem("signcaption."+k); return v==null?d:JSON.parse(v); }catch{ return d; } },
+  set(k,v){ try{ localStorage.setItem("signcaption."+k,JSON.stringify(v)); }catch{} }
+};
+function setStatus(t,cls=""){ const s=$("status"); s.textContent=t; s.className=cls; }
+
+// ---------- geometry ----------
+const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
+const dot=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
+const len=a=>Math.hypot(a.x,a.y,a.z);
+const scale=(a,s)=>({x:a.x*s,y:a.y*s,z:a.z*s});
+const dist=(a,b)=>len(sub(a,b));
+const ang=(u,v)=>Math.acos(Math.max(-1,Math.min(1,dot(u,v)/((len(u)*len(v))||1))))*180/Math.PI;
+const FINGERS={i:[5,6,7,8],m:[9,10,11,12],r:[13,14,15,16],p:[17,18,19,20]};
+
+// Turns one hand into finger states (for the built-in rules) and a numeric fingerprint (for calibration).
+function analyze(W,I){
+  const palm=dist(W[0],W[9])||1;
+  const xa=sub(W[17],W[5]), xl=len(xa)||1, xh=scale(xa,1/xl);
+  let y=sub(W[9],W[0]); y=sub(y,scale(xh,dot(y,xh))); const yh=scale(y,1/(len(y)||1));
+  const across=p=>dot(sub(p,W[5]),xh)/xl;
+  const up=p=>dot(sub(p,W[0]),yh)/palm;
+  const st={}, hook={}, feat=[];
+  for(const [k,[a,b,c,d]] of Object.entries(FINGERS)){
+    const mcp=ang(sub(W[a],W[0]),sub(W[b],W[a]));
+    const pip=ang(sub(W[b],W[a]),sub(W[c],W[b]));
+    const dip=ang(sub(W[c],W[b]),sub(W[d],W[c]));
+    feat.push(mcp/90,pip/90,dip/90);
+    const total=mcp+pip+dip;
+    st[k]=total<65?"S":total>170?"C":"B";
+    hook[k]=mcp<45&&pip>55;
+  }
+  const dx=I[8].x-I[5].x, dy=I[8].y-I[5].y, dl=Math.hypot(dx,dy)||1;
+  const dir=dy<-0.55*dl?"up":dy>0.55*dl?"down":"side";
+  const thumbExt=dist(W[4],W[5])/palm>0.75 && ang(sub(W[3],W[2]),sub(W[4],W[3]))<40;
+  const thumbFront=W[4].z<(W[6].z+W[10].z)/2-0.006;
+  feat.push(ang(sub(W[2],W[1]),sub(W[3],W[2]))/90, ang(sub(W[3],W[2]),sub(W[4],W[3]))/90,
+    across(W[4]), up(W[4]),
+    ...[8,12,16,20].map(t=>dist(W[4],W[t])/palm),
+    dist(W[8],W[12])/palm, (across(W[12])-across(W[8]))*2,
+    dir==="up"?1.5:0, dir==="side"?1.5:0, dir==="down"?1.5:0, thumbFront?0.5:0);
+  return { feat,st,hook,dir,thumbExt,thumbFront,
+    thumbAcross:across(W[4]), thumbUp:up(W[4]),
+    pinchI:dist(W[4],W[8])/palm, pinchM:dist(W[4],W[12])/palm,
+    spread:ang(sub(W[8],W[5]),sub(W[12],W[9])),
+    crossed:across(W[8])>across(W[12])+0.04,
+    thumbIndexAngle:ang(sub(W[4],W[2]),sub(W[8],W[5])),
+    upIdxMcp:up(W[5]), upIdxTip:up(W[8]) };
+}
+
+// Built-in letter rules, used only until calibration exists.
+function ruleLetter(h){
+  const {st,hook,dir}=h, S=k=>st[k]==="S", N=k=>st[k]!=="S";
+  if(S("i")&&S("m")&&S("r")&&S("p")) return (h.thumbAcross>0.15&&!h.thumbExt)?"B":null;
+  if(S("i")&&S("m")&&S("r")&&N("p")) return "W";
+  if(S("i")&&S("m")&&N("r")&&N("p")){
+    if(dir==="down") return "P";
+    if(h.crossed) return "R";
+    if(dir==="side") return "H";
+    if(h.thumbUp>h.upIdxMcp+0.2&&h.thumbAcross>-0.1&&h.thumbAcross<0.6&&h.spread>8) return "K";
+    return h.spread>11?"V":"U";
+  }
+  if(S("i")&&N("m")&&N("r")&&N("p")){
+    if(dir==="down") return "Q";
+    if(dir==="side") return "G";
+    if(h.thumbExt&&h.thumbIndexAngle>50) return "L";
+    return "D";
+  }
+  if(N("i")&&N("m")&&N("r")&&S("p")) return h.thumbExt?"Y":"I";
+  if(N("i")&&S("m")&&S("r")&&S("p")) return "F";
+  if(hook.i&&st.m==="C"&&st.r==="C"&&st.p==="C"&&h.pinchI>0.45) return "X";
+  if(["i","m","r","p"].every(k=>st[k]==="B")){
+    if(h.pinchI<0.4) return h.thumbAcross>0.35?"E":"O";
+    if(h.pinchI<1.3) return "C";
+  }
+  if(h.thumbAcross<0.05) return "A";
+  if(h.pinchI<0.45&&h.pinchM<0.5&&h.thumbUp<h.upIdxTip) return "E";
+  if(h.thumbFront) return "S";
+  if(h.thumbAcross<0.33) return "T";
+  if(h.thumbAcross<0.62) return "N";
+  return "M";
+}
+
+// ---------- your hand's samples (calibration + learned corrections) ----------
+const CAL_LETTERS="ABCDEFGHIKLMNOPQRSTUVWXY".split("");
+let samples=store.get("samples",[]);   // [{L, f, learned?}]
+const calibrated=()=>new Set(samples.filter(s=>!s.learned).map(s=>s.L)).size>=12;
+function knnLetter(f){
+  const best=samples.map(s=>{ let d=0; for(let i=0;i<f.length;i++){const t=f[i]-s.f[i]; d+=t*t;} return {d:Math.sqrt(d),L:s.L}; })
+    .sort((a,b)=>a.d-b.d).slice(0,7);
+  if(!best.length||best[0].d>1.6) return null;
+  const votes={}; best.forEach(b=>votes[b.L]=(votes[b.L]||0)+1/(b.d+0.15));
+  const ranked=Object.entries(votes).sort((a,b)=>b[1]-a[1]);
+  const total=ranked.reduce((s,r)=>s+r[1],0);
+  return ranked[0][1]/total>=0.55?ranked[0][0]:null;    // unsure or mid-transition
+}
+const readLetter=h=>calibrated()?knnLetter(h.feat):ruleLetter(h);
+function learn(L,f){
+  samples.push({L,f,learned:true});
+  const mine=samples.filter(s=>s.learned&&s.L===L);
+  if(mine.length>40) samples.splice(samples.indexOf(mine[0]),1);   // keep the newest corrections
+}
+
+// ---------- calibration walkthrough (each letter twice) ----------
+const CAL_PLAN=[...CAL_LETTERS.map(L=>({L,pass:1})),...CAL_LETTERS.map(L=>({L,pass:2}))];
+let calib=null;   // {i, phase, until}
+function startCalib(){
+  samples=[]; calib={i:0,phase:"get",until:performance.now()+2500}; renderCalib();
+}
+function finishCalib(saveIt){
+  calib=null; renderCalib();
+  if(saveIt) store.set("samples",samples);
+  setStatus(calibrated()?"Ready. Start spelling.":"Using built-in letters. Redo calibration in Settings anytime.","live");
+}
+function renderCalib(){
+  $("calbox").hidden=!calib; if(!calib) return;
+  const step=CAL_PLAN[calib.i];
+  $("calL").textContent=step.L;
+  $("calnote").textContent=calib.phase==="get"
+    ?(step.pass===1?"Get ready to sign":"Round 2: shift your hand a little")
+    :"Hold it";
+  $("calprog").style.width=(calib.i/CAL_PLAN.length*100)+"%";
+}
+function stepCalib(h){
+  const now=performance.now();
+  if(calib.phase==="get"){ if(now>calib.until){ calib.phase="rec"; calib.until=now+1100; renderCalib(); } return; }
+  if(h) samples.push({L:CAL_PLAN[calib.i].L,f:h.feat});
+  if(now>calib.until){
+    calib.i++;
+    if(calib.i>=CAL_PLAN.length) return finishCalib(true);
+    calib.phase="get"; calib.until=now+(CAL_PLAN[calib.i].pass===2&&calib.i===CAL_LETTERS.length?2500:1300); renderCalib();
+  }
+}
+
+// ---------- J and Z (motion letters) ----------
+let trail=[];
+function motionLetter(){
+  if(trail.length<18) return null;
+  const t=trail.slice(-24), size=t.reduce((s,f)=>s+f.size,0)/t.length||1;
+  const path=(kx,ky)=>{let d=0;for(let k=1;k<t.length;k++)d+=Math.hypot(t[k][kx]-t[k-1][kx],t[k][ky]-t[k-1][ky]);return d/size;};
+  const share=Ls=>t.filter(f=>Ls.includes(f.L)).length/t.length;
+  if(share(["I","Y"])>0.6&&path("px","py")>1.6&&(t[t.length-1].py-t[0].py)/size>0.3) return "J";
+  if(share(["D","G","L","Q"])>0.6&&path("ix","iy")>2.2){
+    let flips=0,last=0;
+    for(let k=2;k<t.length;k++){const d=t[k].ix-t[k-2].ix; const s=Math.abs(d)/size>0.08?Math.sign(d):0; if(s&&last&&s!==last)flips++; if(s)last=s;}
+    if(flips>=2) return "Z";
+  }
+  return null;
+}
+
+// ---------- matching spelled letters to your words ----------
+const LOOKALIKE=["AEMNST","UVRKW","GHPQ","IJY","DZL","OCE","BF","XD"];
+const subCost=(a,b)=>a===b?0:LOOKALIKE.some(g=>g.includes(a)&&g.includes(b))?0.35:1;
+const INS=0.5, DEL=0.8;
+function table(s,w){
+  const D=[Array.from({length:w.length+1},(_,j)=>j*DEL)];
+  for(let i=1;i<=s.length;i++){
+    D[i]=[i*INS];
+    for(let j=1;j<=w.length;j++)
+      D[i][j]=Math.min(D[i-1][j]+INS, D[i][j-1]+DEL, D[i-1][j-1]+subCost(s[i-1],w[j-1]));
+  }
+  return D;
+}
+function rank(spelled,prefix){
+  const s=spelled.toUpperCase();
+  return wordList.map(w=>{
+    const row=table(s,w.toUpperCase())[s.length];
+    const cost=prefix?Math.min(...row):row[w.length];
+    return {w,score:cost/Math.max(s.length,prefix?1:w.length)};
+  }).sort((a,b)=>a.score-b.score);
+}
+// Which spelled letter lined up with which letter of the chosen word (for learning).
+function alignment(spelled,word){
+  const s=spelled.toUpperCase(), w=word.toUpperCase(), D=table(s,w), pairs=[];
+  let i=s.length, j=w.length;
+  while(i>0&&j>0){
+    if(D[i][j]===D[i-1][j-1]+subCost(s[i-1],w[j-1])){ pairs.push([i-1,w[j-1]]); i--; j--; }
+    else if(D[i][j]===D[i-1][j]+INS) i--;
+    else j--;
+  }
+  return pairs;
+}
+
+// ---------- caption ----------
+let wordList=[], words=[], spelling="", spellFeats=[];
+function parseWords(){
+  wordList=[...new Set($("words").value.split(/[\s,]+/).map(w=>w.trim()).filter(Boolean))];
+  store.set("words",$("words").value);
+}
+function say(t){ if($("speak").checked&&"speechSynthesis" in window) speechSynthesis.speak(new SpeechSynthesisUtterance(t)); }
+function render(){
+  const c=$("caption"); c.innerHTML="";
+  words.slice(-30).forEach((w,i,a)=>{ const s=document.createElement("span"); s.textContent=w+" "; if(i===a.length-1)s.className="new"; c.appendChild(s); });
+  $("spelling").textContent=spelling;
+  const sg=$("sugs"); sg.innerHTML="";
+  if(spelling&&wordList.length){
+    rank(spelling,true).filter(r=>r.score<0.3).slice(0,4).forEach(({w})=>{
+      const b=document.createElement("button"); b.textContent=w; b.onclick=()=>pickWord(w); sg.appendChild(b);
+    });
+  }
+}
+function pickWord(w){
+  // every letter that lined up with this word becomes a training sample for the right letter
+  alignment(spelling,w).forEach(([i,L])=>{ if(spellFeats[i]&&CAL_LETTERS.includes(L)) learn(L,spellFeats[i]); });
+  store.set("samples",samples);
+  words.push(w); spelling=""; spellFeats=[]; render(); say(w);
+}
+function endWord(){
+  if(!spelling) return;
+  if(!wordList.length){ words.push(spelling.toLowerCase()); spelling=""; spellFeats=[]; render(); return; }
+  const best=rank(spelling,false)[0];
+  if(best.score<=0.45) return pickWord(best.w);
+  setStatus(`Couldn’t match “${spelling}”. Try again or tap a word.`);
+  spelling=""; spellFeats=[]; render();
+}
+function addLetter(L,f){
+  if((L==="J"&&lastEmit.L==="I"||L==="Z"&&["D","G"].includes(lastEmit.L))&&performance.now()-lastEmit.t<2500&&spelling.endsWith(lastEmit.L)){
+    spelling=spelling.slice(0,-1); spellFeats.pop();
+  }
+  spelling+=L; spellFeats.push(f); lastEmit={L,t:performance.now()}; render();
+}
+
+// ---------- main loop ----------
+let landmarker=null, running=false, lastTime=-1;
+let stable={L:null,n:0}, blocked=null, blockX=0, noHand=0, nullRun=0, lastEmit={L:null,t:0};
+const PAUSE=20;   // frames with no hand that end a word (~0.7 s)
+
+function draw(res){
+  overlay.width=video.videoWidth; overlay.height=video.videoHeight;
+  ctx.clearRect(0,0,overlay.width,overlay.height);
+  ctx.fillStyle="#ffb547";
+  (res.landmarks||[]).forEach(lm=>lm.forEach(p=>{ctx.beginPath();ctx.arc(p.x*overlay.width,p.y*overlay.height,4,0,7);ctx.fill();}));
+}
+function loop(){
+  if(!running) return;
+  requestAnimationFrame(loop);
+  if(video.currentTime===lastTime) return;
+  lastTime=video.currentTime;
+  const res=landmarker.detectForVideo(video,performance.now());
+  draw(res);
+
+  let h=null, I=null, size=0;
+  if(res.landmarks?.length){
+    let k=0;
+    res.landmarks.forEach((lm,i)=>{const s=Math.hypot(lm[0].x-lm[9].x,lm[0].y-lm[9].y); if(s>size){size=s;k=i;}});
+    I=res.landmarks[k]; h=analyze(res.worldLandmarks[k],I); noHand=0;
+  } else { noHand++; trail=[]; }
+
+  if(calib){ $("letter").textContent=""; stepCalib(h); return; }
+
+  const L=h?readLetter(h):null;
+  $("letter").textContent=L||"";
+  if(I){ trail.push({L,ix:I[8].x,iy:I[8].y,px:I[20].x,py:I[20].y,size}); if(trail.length>40) trail.shift(); }
+
+  const m=motionLetter();
+  if(m&&m!==blocked){ addLetter(m,null); blocked=m; trail=[]; stable={L:null,n:0}; }
+
+  if(noHand>=PAUSE){ endWord(); blocked=null; }
+  if(!L){ if(++nullRun>6) blocked=null; } else nullRun=0;
+
+  if(L===stable.L) stable.n++; else stable={L,n:1};
+  if(blocked&&L&&L!==blocked&&stable.n>=3) blocked=null;          // a different letter re-arms
+  if(blocked&&I&&Math.abs(I[0].x-blockX)>0.06) blocked=null;      // a sideways slide = double letter
+
+  const need=+$("hold").value, armed=L&&L!==blocked;
+  $("meter").style.width=(armed?Math.min(1,stable.n/need)*100:0)+"%";
+  if(armed&&stable.n>=need){ addLetter(L,h.feat); blocked=L; blockX=I[0].x; stable.n=0; }
+}
+
+// ---------- startup ----------
+async function init(){
+  try{
+    const fs=await FilesetResolver.forVisionTasks(WASM);
+    const opts=delegate=>({baseOptions:{modelAssetPath:MODEL,delegate},runningMode:"VIDEO",numHands:2});
+    try{ landmarker=await HandLandmarker.createFromOptions(fs,opts("GPU")); }
+    catch{ landmarker=await HandLandmarker.createFromOptions(fs,opts("CPU")); }
+    setStatus("Ready");
+  }catch(e){ setStatus("Couldn’t load the hand tracker: "+(e?.message||e),"err"); }
+}
+async function start(skipCal){
+  if(!landmarker){ setStatus("Still loading, one moment…"); return; }
+  try{
+    video.srcObject=await navigator.mediaDevices.getUserMedia({video:{width:960,height:720}});
+    await video.play();
+  }catch{ setStatus("Camera blocked. Allow it in the address bar, or close other apps using the camera.","err"); return; }
+  $("startcard").hidden=true; running=true; loop();
+  if(skipCal) store.set("skipCal",true);
+  if(calibrated()||store.get("skipCal",false)) setStatus(calibrated()?"Ready. Start spelling.":"Using built-in letters. Calibrate anytime in Settings.","live");
+  else { setStatus("Learning your hand…","live"); startCalib(); }
+}
+
+$("start").onclick=()=>start(false);
+$("startskip").onclick=()=>start(true);
+$("calskip").onclick=()=>{ store.set("skipCal",true); finishCalib(calibrated()); if(!calibrated()) samples=samples.filter(s=>s.learned); };
+$("recal").onclick=()=>{ if(running) startCalib(); else setStatus("Press Start first."); };
+$("undo").onclick=()=>{ if(spelling){ spelling=spelling.slice(0,-1); spellFeats.pop(); } else words.pop(); render(); };
+$("clear").onclick=()=>{ words=[]; spelling=""; spellFeats=[]; render(); };
+$("capmode").onclick=()=>document.body.classList.toggle("capmode");
+$("words").addEventListener("input",()=>{ parseWords(); render(); });
+$("speak").checked=store.get("speak",false);
+$("speak").onchange=()=>store.set("speak",$("speak").checked);
+$("hold").value=store.get("hold",12);
+$("hold").oninput=()=>store.set("hold",+$("hold").value);
+document.addEventListener("keydown",e=>{
+  if(e.target.tagName==="TEXTAREA") return;
+  if(e.key===" "){ e.preventDefault(); endWord(); }
+  else if(e.key==="Backspace") $("undo").click();
+  else if(e.key.toLowerCase()==="c") document.body.classList.toggle("capmode");
+});
+$("words").value=store.get("words","hello, my, name, is, friend, yes, no, thank, you, what, how, are, good");
+if(calibrated()||store.get("skipCal",false)){ $("startnote").textContent=calibrated()?"Your hand is already calibrated.":"Using built-in letters. You can calibrate in Settings."; $("startskip").hidden=true; }
+parseWords(); render(); init();
+</script>
+</body>
+</html>
